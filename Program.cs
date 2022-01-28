@@ -55,6 +55,13 @@ namespace FezConverter
         public Vector3 Position;
         public Vector3 Normal;
         public Vector2 TextureCoord;
+
+        public void TransformPos(Vector3 pos, Quaternion rot, Vector3 scale)
+        {
+            Position *= scale;
+            Position = Position.Transform(rot);
+            Position += pos;
+        }
     }
 
     public struct Face
@@ -81,14 +88,13 @@ namespace FezConverter
             Quaternion.CreateFromYawPitchRoll(Constants.HalfPi,0,0)
         };
 
+        private const float TEX_EPSILON = 0.005f;
+
+        static NumberFormatInfo fmt = new NumberFormatInfo { NegativeSign = "-", NumberDecimalSeparator = "." };
 
         static void ConvertArtObject(string path, XmlDocument modelDoc)
         {
             Console.WriteLine("Converting ArtObject");
-
-            var fmt = new NumberFormatInfo();
-            fmt.NegativeSign = "-";
-            fmt.NumberDecimalSeparator = ".";
 
             XmlNode sizeNode = modelDoc.SelectSingleNode("/ArtObject/Size/Vector3");
             Vector3 offset = new Vector3
@@ -128,10 +134,6 @@ namespace FezConverter
                 return objData;
             }
 
-            var fmt = new NumberFormatInfo();
-            fmt.NegativeSign = "-";
-            fmt.NumberDecimalSeparator = ".";
-
             XmlNode sizeNode = modelDoc.SelectSingleNode("/ArtObject/Size/Vector3");
             offset = -offset / 2.0f - new Vector3(0.5f);
 
@@ -156,10 +158,6 @@ namespace FezConverter
         static string ConvertArtObjectModel(XmlNode meshNode, Vector3 offset, Vector3 position, Quaternion rotation, Vector3 scale, ref int vertexOffset, out string objName)
         {
             string objData = "";
-
-            var fmt = new NumberFormatInfo();
-            fmt.NegativeSign = "-";
-            fmt.NumberDecimalSeparator = ".";
 
             XmlNodeList verticesXml = meshNode.SelectNodes("//VertexPositionNormalTextureInstance");
             List<Vertex> vertices = new List<Vertex>();
@@ -265,10 +263,6 @@ namespace FezConverter
         {
             Console.WriteLine("Converting TrileSet");
 
-            var fmt = new NumberFormatInfo();
-            fmt.NegativeSign = "-";
-            fmt.NumberDecimalSeparator = ".";
-
             string objData = "";
 
             XmlNodeList triles = modelDoc.SelectNodes("//Triles/TrileEntry/Trile");
@@ -311,10 +305,6 @@ namespace FezConverter
             //Console.WriteLine("Converting " + objName);
 
             string objData = "";
-
-            var fmt = new NumberFormatInfo();
-            fmt.NegativeSign = "-";
-            fmt.NumberDecimalSeparator = ".";
 
             /*XmlNode sizeNode = meshNode.SelectSingleNode("./Size/Vector3");
             Vector3 size = new Vector3
@@ -446,7 +436,9 @@ namespace FezConverter
             string objName = planeNode.Attributes["textureName"].Value.ToLower().Replace(" ", "_");
             string imgPath = Path.Combine(path, "background planes", objName + ".png");
 
+            Vector2 imgActualSize = Vector2.Zero;
             Vector2 imgSize = Vector2.Zero;
+            Vector2 spriteScale = Vector2.One;
 
             bool animated = planeNode.Attributes["animated"].Value == "True";
             if (animated)
@@ -461,11 +453,14 @@ namespace FezConverter
                     animXml.Load(xmlPath);
                     int width = int.Parse(animXml.DocumentElement.Attributes["width"].Value);
                     int height = int.Parse(animXml.DocumentElement.Attributes["height"].Value);
+                    imgSize = new Vector2(width, height);
 
                     int spriteWidth = int.Parse(animXml.DocumentElement.Attributes["actualWidth"].Value);
                     int spriteHeight = int.Parse(animXml.DocumentElement.Attributes["actualHeight"].Value);
+                    imgActualSize = new Vector2(spriteWidth, spriteHeight);
 
-                    imgSize = new Vector2(spriteWidth, spriteHeight);
+                    spriteScale = imgSize / imgActualSize;
+
                 }
                 else
                 {
@@ -479,32 +474,71 @@ namespace FezConverter
                 //backgroundPlanePng = backgroundPlanePath.string() + bpName + ".png";
 
                 Image img = Image.FromFile(imgPath);
-                imgSize = new Vector2(img.Width, img.Height);
+                imgActualSize = new Vector2(img.Width, img.Height);
+                imgSize = imgActualSize;
+                img.Dispose();
             }
-
-            string objData = "";
-
-            var fmt = new NumberFormatInfo();
-            fmt.NegativeSign = "-";
-            fmt.NumberDecimalSeparator = ".";
-
-            offset = -offset / 2.0f - new Vector3(0.5f);
-
-            bool doubleSided = planeNode.Attributes["doubleSided"].Value == "True";
-            bool billboard = planeNode.Attributes["billboard"].Value == "True";
-            bool lightmap = planeNode.Attributes["lightMap"].Value == "True";
-            bool pixelatedLightmap = planeNode.Attributes["pixelatedLightmap"].Value == "True";
-            bool clampTexture = planeNode.Attributes["clampTexture"].Value == "True";
-
-
-
-            objData += "\n\n";
 
             mtlData = "newmtl " + objName + "\n";
             mtlData += "Ns 0.000000\nKa 1.000000 1.000000 1.000000\nKd 1.000000 1.000000 1.000000\nKs 0.000000 0.000000 0.000000\nKe 0.000000 0.000000 0.000000\nNi 1.000000\nd 1.000000\nillum 2\nmap_kd ";
             mtlData += Path.GetFileName(imgPath);
             mtlData += "\n\n";
             mtlData = mtlData.Replace(",", ".");
+
+
+            Vector3 norm = Vector3.UnitZ.Transform(rotation);
+            Vector3 extraOffset = new Vector3(-0.5f, -0.5f, -0.5f);
+            Vector3 pos = position + offset + norm * 0.0005f + extraOffset;
+            Vector3 realScale = scale * new Vector3(imgActualSize.X / 16.0f, imgActualSize.Y / 16.0f, 1.0f);
+
+            string objData = "o " + objName + "-" + vertexOffset + "\n";
+            objData += "usemtl " + objName + "\n\n";
+
+            offset = -offset / 2.0f - new Vector3(0.5f);
+            
+            bool doubleSided = planeNode.Attributes["doubleSided"].Value == "True";
+            bool billboard = planeNode.Attributes["billboard"].Value == "True";
+            bool lightmap = planeNode.Attributes["lightMap"].Value == "True";
+            bool pixelatedLightmap = planeNode.Attributes["pixelatedLightmap"].Value == "True";
+            bool clampTexture = planeNode.Attributes["clampTexture"].Value == "True";
+
+            Vertex[] vertices =
+            {
+                new Vertex{Normal = norm, Position = new Vector3( -0.5f,  0.5f,  0.0f ), TextureCoord = new Vector2( 0.0f + TEX_EPSILON, 1.0f - TEX_EPSILON )},
+                new Vertex{Normal = norm, Position = new Vector3(  0.5f,  0.5f,  0.0f ), TextureCoord = new Vector2( 1.0f - TEX_EPSILON, 1.0f - TEX_EPSILON )},
+                new Vertex{Normal = norm, Position = new Vector3(  0.5f, -0.5f,  0.0f ), TextureCoord = new Vector2( 1.0f - TEX_EPSILON, 0.0f + TEX_EPSILON )},
+                new Vertex{Normal = norm, Position = new Vector3( -0.5f, -0.5f,  0.0f ), TextureCoord = new Vector2( 0.0f + TEX_EPSILON, 0.0f + TEX_EPSILON )}
+            };
+
+            Face[] faces =
+            {
+                new Face{vertex1 = 1+vertexOffset, vertex2 = 2+vertexOffset, vertex3 = 3+vertexOffset},
+                new Face{vertex1 = 3+vertexOffset, vertex2 = 4+vertexOffset, vertex3 = 1+vertexOffset}
+            };
+
+            string posString = "";
+            string normString = "";
+            string texString = "";
+            string triString = "";
+
+            foreach (Vertex vertex in vertices)
+            {
+                vertex.TransformPos(pos,rotation,realScale);
+                posString += vertex.Position.ToString("v");
+                normString += vertex.Normal.ToString("vn");
+                texString += vertex.TextureCoord.ToString("vt");
+            }
+
+            foreach (Face face in faces)
+            {
+                triString += face.ToString();
+            }
+
+            objData += $"{posString}\n{texString}\n{normString}\n{triString}";
+
+            objData += "\n\n";
+
+            vertexOffset += 4;
 
             return objData;
         }
@@ -527,10 +561,6 @@ namespace FezConverter
                 return;
             }
 
-            var fmt = new NumberFormatInfo();
-            fmt.NegativeSign = "-";
-            fmt.NumberDecimalSeparator = ".";
-
             int vertexOffset = 0;
             string objData = "";
             string mtlData = "";
@@ -546,111 +576,126 @@ namespace FezConverter
             File.Copy(trileSetPath.Replace(".xml", ".png"), Path.Combine(exportPath, Path.GetFileNameWithoutExtension(trileSetPath) + ".png"),true);
 
             int currentConvert = 1;
+            int totalConverts = 1;
 
-            XmlNodeList triles = modelDoc.SelectNodes("/Level/Triles/Entry/TrileInstance");
-            int totalConverts = triles.Count;
-            foreach(XmlNode trile in triles)
             {
-                Console.WriteLine(currentConvert + "/" + totalConverts + " Triles");
-                XmlNode posNode = trile.SelectSingleNode("./Position/Vector3");
-                Vector3 pos = new Vector3
-                (
-                    float.Parse(posNode.Attributes["x"].Value, fmt),
-                    float.Parse(posNode.Attributes["y"].Value, fmt),
-                    float.Parse(posNode.Attributes["z"].Value, fmt)
-                );
-                objData += LoadTrile(trileSetPath, trileSetDoc, trileSetName, trile.Attributes["trileId"].Value, -offset / 2f, pos, int.Parse(trile.Attributes["orientation"].Value,fmt), ref vertexOffset);
-                currentConvert++;
+                XmlNodeList triles = modelDoc.SelectNodes("/Level/Triles/Entry/TrileInstance");
+                totalConverts = triles.Count;
+                foreach (XmlNode trile in triles)
+                {
+                    Console.WriteLine(currentConvert + "/" + totalConverts + " Triles");
+                    XmlNode posNode = trile.SelectSingleNode("./Position/Vector3");
+                    Vector3 pos = new Vector3
+                    (
+                        float.Parse(posNode.Attributes["x"].Value, fmt),
+                        float.Parse(posNode.Attributes["y"].Value, fmt),
+                        float.Parse(posNode.Attributes["z"].Value, fmt)
+                    );
+                    objData += LoadTrile(trileSetPath, trileSetDoc, trileSetName, trile.Attributes["trileId"].Value,
+                        -offset / 2f, pos, int.Parse(trile.Attributes["orientation"].Value, fmt), ref vertexOffset);
+                    currentConvert++;
+                }
+
+                mtlData = "newmtl " + trileSetName + "\n";
+                mtlData += "Ns 0.000000\nKa 1.000000 1.000000 1.000000\nKd 1.000000 1.000000 1.000000\nKs 0.000000 0.000000 0.000000\nKe 0.000000 0.000000 0.000000\nNi 1.000000\nd 1.000000\nillum 2\nmap_kd ";
+                mtlData += Path.GetFileNameWithoutExtension(trileSetPath) + ".png";
+                mtlData += "\n\n";
             }
+            GC.Collect();
 
-            mtlData = "newmtl " + trileSetName + "\n";
-            mtlData += "Ns 0.000000\nKa 1.000000 1.000000 1.000000\nKd 1.000000 1.000000 1.000000\nKs 0.000000 0.000000 0.000000\nKe 0.000000 0.000000 0.000000\nNi 1.000000\nd 1.000000\nillum 2\nmap_kd ";
-            mtlData += Path.GetFileNameWithoutExtension(trileSetPath) + ".png";
-            mtlData += "\n\n";
-
-
-            currentConvert = 1;
-            XmlNodeList artObjects = modelDoc.SelectNodes("/Level/ArtObjects/Entry/ArtObjectInstance");
-            totalConverts = artObjects.Count;
-            foreach (XmlNode artObject in artObjects)
             {
-                Console.WriteLine(currentConvert + "/" + totalConverts + " Art objects");
-                string artPath = Path.Combine(mainPath, "art objects", artObject.Attributes["name"].Value.ToLower().Replace(" ", "_") + ".xml");
+                currentConvert = 1;
+                XmlNodeList artObjects = modelDoc.SelectNodes("/Level/ArtObjects/Entry/ArtObjectInstance");
+                totalConverts = artObjects.Count;
+                foreach (XmlNode artObject in artObjects)
+                {
+                    Console.WriteLine(currentConvert + "/" + totalConverts + " Art objects");
+                    string artPath = Path.Combine(mainPath, "art objects",
+                        artObject.Attributes["name"].Value.ToLower().Replace(" ", "_") + ".xml");
 
-                File.Copy(artPath.Replace(".xml", ".png"), Path.Combine(exportPath, Path.GetFileNameWithoutExtension(artPath) + ".png"),true);
+                    File.Copy(artPath.Replace(".xml", ".png"),
+                        Path.Combine(exportPath, Path.GetFileNameWithoutExtension(artPath) + ".png"), true);
 
-                XmlNode posNode = artObject.SelectSingleNode("./Position/Vector3");
-                Vector3 pos = new Vector3
-                (
-                    float.Parse(posNode.Attributes["x"].Value, fmt),
-                    float.Parse(posNode.Attributes["y"].Value, fmt),
-                    float.Parse(posNode.Attributes["z"].Value, fmt)
-                );
+                    XmlNode posNode = artObject.SelectSingleNode("./Position/Vector3");
+                    Vector3 pos = new Vector3
+                    (
+                        float.Parse(posNode.Attributes["x"].Value, fmt),
+                        float.Parse(posNode.Attributes["y"].Value, fmt),
+                        float.Parse(posNode.Attributes["z"].Value, fmt)
+                    );
 
-                XmlNode rotNode = artObject.SelectSingleNode("./Rotation/Quaternion");
-                Quaternion rot = new Quaternion
-                (
-                    float.Parse(rotNode.Attributes["x"].Value, fmt),
-                    float.Parse(rotNode.Attributes["y"].Value, fmt),
-                    float.Parse(rotNode.Attributes["z"].Value, fmt),
-                    float.Parse(rotNode.Attributes["w"].Value, fmt)
-                );
+                    XmlNode rotNode = artObject.SelectSingleNode("./Rotation/Quaternion");
+                    Quaternion rot = new Quaternion
+                    (
+                        float.Parse(rotNode.Attributes["x"].Value, fmt),
+                        float.Parse(rotNode.Attributes["y"].Value, fmt),
+                        float.Parse(rotNode.Attributes["z"].Value, fmt),
+                        float.Parse(rotNode.Attributes["w"].Value, fmt)
+                    );
 
-                XmlNode scaleNode = artObject.SelectSingleNode("./Scale/Vector3");
-                Vector3 scale = new Vector3
-                (
-                    float.Parse(scaleNode.Attributes["x"].Value, fmt),
-                    float.Parse(scaleNode.Attributes["y"].Value, fmt),
-                    float.Parse(scaleNode.Attributes["z"].Value, fmt)
-                );
-                objData += LoadArtObject(mainPath, artObject.Attributes["name"].Value, offset, pos, rot, scale, ref vertexOffset, out string objMtlData);
-                mtlData += objMtlData;
+                    XmlNode scaleNode = artObject.SelectSingleNode("./Scale/Vector3");
+                    Vector3 scale = new Vector3
+                    (
+                        float.Parse(scaleNode.Attributes["x"].Value, fmt),
+                        float.Parse(scaleNode.Attributes["y"].Value, fmt),
+                        float.Parse(scaleNode.Attributes["z"].Value, fmt)
+                    );
+                    objData += LoadArtObject(mainPath, artObject.Attributes["name"].Value, offset, pos, rot, scale,
+                        ref vertexOffset, out string objMtlData);
+                    mtlData += objMtlData;
 
-                currentConvert++;
+                    currentConvert++;
+                }
             }
+            GC.Collect();
 
-            currentConvert = 1;
-            XmlNodeList backgroundPlanes = modelDoc.SelectNodes("/Level/BackgroundPlanes/Entry/BackgroundPlane");
-            totalConverts = backgroundPlanes.Count;
-            foreach (XmlNode backgroundPlane in backgroundPlanes)
             {
-                Console.WriteLine(currentConvert + "/" + totalConverts + " Background planes");
-                string artPath = Path.Combine(mainPath, "background planes", backgroundPlane.Attributes["textureName"].Value.ToLower().Replace(" ", "_") + ".png");
+                currentConvert = 1;
+                XmlNodeList backgroundPlanes = modelDoc.SelectNodes("/Level/BackgroundPlanes/Entry/BackgroundPlane");
+                totalConverts = backgroundPlanes.Count;
+                foreach (XmlNode backgroundPlane in backgroundPlanes)
+                {
+                    Console.WriteLine(currentConvert + "/" + totalConverts + " Background planes");
+                    string artPath = Path.Combine(mainPath, "background planes",
+                        backgroundPlane.Attributes["textureName"].Value.ToLower().Replace(" ", "_") + ".png");
 
-                if (backgroundPlane.Attributes["animated"].Value == "True")
-                    artPath = artPath.Replace(".png", ".ani.png");
+                    if (backgroundPlane.Attributes["animated"].Value == "True")
+                        artPath = artPath.Replace(".png", ".ani.png");
 
-                File.Copy(artPath, Path.Combine(exportPath, Path.GetFileName(artPath)));
+                    File.Copy(artPath, Path.Combine(exportPath, Path.GetFileName(artPath)), true);
 
-                XmlNode posNode = backgroundPlane.SelectSingleNode("./Position/Vector3");
-                Vector3 pos = new Vector3
-                (
-                    float.Parse(posNode.Attributes["x"].Value, fmt),
-                    float.Parse(posNode.Attributes["y"].Value, fmt),
-                    float.Parse(posNode.Attributes["z"].Value, fmt)
-                );
+                    XmlNode posNode = backgroundPlane.SelectSingleNode("./Position/Vector3");
+                    Vector3 pos = new Vector3
+                    (
+                        float.Parse(posNode.Attributes["x"].Value, fmt),
+                        float.Parse(posNode.Attributes["y"].Value, fmt),
+                        float.Parse(posNode.Attributes["z"].Value, fmt)
+                    );
 
-                XmlNode rotNode = backgroundPlane.SelectSingleNode("./Rotation/Quaternion");
-                Quaternion rot = new Quaternion
-                (
-                    float.Parse(rotNode.Attributes["x"].Value, fmt),
-                    float.Parse(rotNode.Attributes["y"].Value, fmt),
-                    float.Parse(rotNode.Attributes["z"].Value, fmt),
-                    float.Parse(rotNode.Attributes["w"].Value, fmt)
-                );
+                    XmlNode rotNode = backgroundPlane.SelectSingleNode("./Rotation/Quaternion");
+                    Quaternion rot = new Quaternion
+                    (
+                        float.Parse(rotNode.Attributes["x"].Value, fmt),
+                        float.Parse(rotNode.Attributes["y"].Value, fmt),
+                        float.Parse(rotNode.Attributes["z"].Value, fmt),
+                        float.Parse(rotNode.Attributes["w"].Value, fmt)
+                    );
 
-                XmlNode scaleNode = backgroundPlane.SelectSingleNode("./Scale/Vector3");
-                Vector3 scale = new Vector3
-                (
-                    float.Parse(scaleNode.Attributes["x"].Value, fmt),
-                    float.Parse(scaleNode.Attributes["y"].Value, fmt),
-                    float.Parse(scaleNode.Attributes["z"].Value, fmt)
-                );
-                objData += LoadBackgroundPlane(mainPath, backgroundPlane, offset, pos, rot, scale, ref vertexOffset, out string objMtlData);
-                mtlData += objMtlData;
+                    XmlNode scaleNode = backgroundPlane.SelectSingleNode("./Scale/Vector3");
+                    Vector3 scale = new Vector3
+                    (
+                        float.Parse(scaleNode.Attributes["x"].Value, fmt),
+                        float.Parse(scaleNode.Attributes["y"].Value, fmt),
+                        float.Parse(scaleNode.Attributes["z"].Value, fmt)
+                    );
+                    objData += LoadBackgroundPlane(mainPath, backgroundPlane, -offset / 2f, pos, rot, scale, ref vertexOffset,
+                        out string objMtlData);
+                    mtlData += objMtlData;
 
-                currentConvert++;
+                    currentConvert++;
+                }
             }
+            GC.Collect();
 
             string objPath = Path.Combine(exportPath, Path.GetFileNameWithoutExtension(path)) + ".obj";
             string mtlPath = Path.Combine(exportPath, Path.GetFileNameWithoutExtension(path)) + ".mtl";
@@ -666,10 +711,6 @@ namespace FezConverter
             Bitmap spriteSheet = new Bitmap(path.Replace(".xml", ".ani.png"));
             string spriteName = Path.GetFileNameWithoutExtension(path);
             string mainFolder = Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(path), spriteName + "-frames")).FullName;
-
-            var fmt = new NumberFormatInfo();
-            fmt.NegativeSign = "-";
-            fmt.NumberDecimalSeparator = ".";
 
             for (int i=0;i< sprites.Count;i++)
             {
