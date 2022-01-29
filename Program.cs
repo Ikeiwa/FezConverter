@@ -591,7 +591,11 @@ namespace FezConverter
                         float.Parse(posNode.Attributes["y"].Value, fmt),
                         float.Parse(posNode.Attributes["z"].Value, fmt)
                     );
-                    objData += LoadTrile(trileSetPath, trileSetDoc, trileSetName, trile.Attributes["trileId"].Value,
+                    
+                    string trileId = trile.Attributes["trileId"].Value;
+
+                    if(trileId != "-1")
+                        objData += LoadTrile(trileSetPath, trileSetDoc, trileSetName, trileId,
                         -offset / 2f, pos, int.Parse(trile.Attributes["orientation"].Value, fmt), ref vertexOffset);
                     currentConvert++;
                 }
